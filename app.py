@@ -127,6 +127,22 @@ def process_variation(api_data):
     # Retorna os dados processados como um DataFrame do Pandas.
     return pd.DataFrame(variations)
 
+def create_comparison_table(df):
+    """
+    Cria uma tabela comparativa de preços entre cidades.
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    # Usa pivot_table para remodelar os dados
+    comparison_df = df.pivot_table(
+        index='Item',
+        columns='Cidade',
+        values='Preço Recente (Prata)',
+        aggfunc='first' # Usa 'first' para evitar problemas com duplicatas se houver
+    )
+    return comparison_df
+
 # --- Layout Principal do Dashboard ---
 st.title("Dashboard de Variação de Preços - Albion Online")
 
@@ -188,6 +204,20 @@ if botao_monitorar:
                     df_variacao[['Item', 'Cidade', 'Preço Recente (Prata)', 'Variação %']]
                     .style.applymap(colorir_variacao, subset=['Variação %'])
                 )
+
+                # Tabela Comparativa de Preços
+                st.subheader("Comparativo de Preços por Cidade")
+                df_comparativo = create_comparison_table(df_variacao)
+
+                if not df_comparativo.empty:
+                    # Aplica um mapa de calor para destacar os preços mais baixos (verde) e mais altos (vermelho) por linha (item)
+                    st.dataframe(
+                        df_comparativo.style.background_gradient(cmap='RdYlGn_r', axis=1)
+                        .format("{:,.0f}", na_rep="-")
+                    )
+                else:
+                    st.warning("Não há dados suficientes para gerar a tabela comparativa.")
+
 
                 # 3. Gráfico de Tendência Histórica
                 st.subheader("Histórico de Preço")
