@@ -143,6 +143,38 @@ def create_comparison_table(df):
     )
     return comparison_df
 
+def prepare_comparison_chart_data(api_data, selected_item):
+    """
+    Prepara os dados para o gráfico de linha comparativo entre cidades.
+    """
+    all_series = []
+
+    # Filtra os dados da API para o item selecionado
+    for record in api_data:
+        if record['item_id'] == selected_item:
+            city = record['location']
+            history_data = record['data']
+
+            if history_data:
+                # Cria um DataFrame para o histórico da cidade
+                df_city = pd.DataFrame(history_data)
+                df_city['timestamp'] = pd.to_datetime(df_city['timestamp'])
+                df_city.set_index('timestamp', inplace=True)
+
+                # Seleciona apenas a coluna de preço médio e renomeia para o nome da cidade
+                series = df_city['avg_price'].rename(city)
+                all_series.append(series)
+
+    # Concatena todas as séries de dados em um único DataFrame
+    if all_series:
+        # axis=1 para concatenar como colunas
+        # .interpolate() para preencher valores ausentes e ter linhas contínuas
+        comparison_chart_df = pd.concat(all_series, axis=1).interpolate(method='time')
+        return comparison_chart_df
+
+    return pd.DataFrame()
+
+
 # --- Layout Principal do Dashboard ---
 st.title("Dashboard de Variação de Preços - Albion Online")
 
@@ -172,19 +204,32 @@ if botao_monitorar:
                 st.subheader("Métricas de Destaque")
                 col1, col2, col3 = st.columns(3)
 
-                maior_alta = df_variacao.loc[df_variacao['Variação %'].idxmax()]
-                maior_queda = df_variacao.loc[df_variacao['Variação %'].idxmin()]
+                # Apenas exibe maior alta/queda se houver mais de um item para comparar
+                if len(df_variacao) > 1:
+                    maior_alta = df_variacao.loc[df_variacao['Variação %'].idxmax()]
+                    maior_queda = df_variacao.loc[df_variacao['Variação %'].idxmin()]
+                else:
+                    maior_alta = maior_queda = df_variacao.iloc[0]
 
                 col1.metric(
                     label=f"📈 Maior Alta: {maior_alta['Item']} ({maior_alta['Cidade']})",
                     value=f"{maior_alta['Variação %']:.2f}%",
                     delta=f"{maior_alta['Variação Absoluta']} Prata"
                 )
-                col2.metric(
-                    label=f"📉 Maior Queda: {maior_queda['Item']} ({maior_queda['Cidade']})",
-                    value=f"{maior_queda['Variação %']:.2f}%",
-                    delta=f"{maior_queda['Variação Absoluta']} Prata"
-                )
+
+                # Só exibe a "Maior Queda" se for diferente da "Maior Alta"
+                if len(df_variacao) > 1:
+                    col2.metric(
+                        label=f"📉 Maior Queda: {maior_queda['Item']} ({maior_queda['Cidade']})",
+                        value=f"{maior_queda['Variação %']:.2f}%",
+                        delta=f"{maior_queda['Variação Absoluta']} Prata"
+                    )
+                else:
+                    col2.metric(
+                        label="📉 Maior Queda",
+                        value="-",
+                        help="Apenas um item monitorado."
+                    )
                 col3.metric(
                     label="🔍 Itens Monitorados",
                     value=len(df_variacao),
@@ -202,7 +247,7 @@ if botao_monitorar:
                 # Exibe o dataframe sem a coluna de variação absoluta
                 st.dataframe(
                     df_variacao[['Item', 'Cidade', 'Preço Recente (Prata)', 'Variação %']]
-                    .style.applymap(colorir_variacao, subset=['Variação %'])
+                    .style.map(colorir_variacao, subset=['Variação %'])
                 )
 
                 # Tabela Comparativa de Preços
@@ -219,28 +264,24 @@ if botao_monitorar:
                     st.warning("Não há dados suficientes para gerar a tabela comparativa.")
 
 
-                # 3. Gráfico de Tendência Histórica
-                st.subheader("Histórico de Preço")
+                # 3. Gráfico Comparativo de Histórico de Preços
+                st.subheader("Gráfico Comparativo de Histórico de Preços")
 
-                # Permite ao usuário selecionar um item/cidade da tabela para visualizar em um gráfico.
-                opcoes_grafico = [f"{row['Item']} - {row['Cidade']}" for index, row in df_variacao.iterrows()]
-                item_selecionado_grafico = st.selectbox("Selecione um Item/Cidade para ver o histórico:", options=opcoes_grafico)
+                # Permite ao usuário selecionar um item para comparar entre as cidades
+                itens_unicos = df_variacao['Item'].unique()
+                item_selecionado_grafico = st.selectbox(
+                    "Selecione um item para comparar o histórico de preços entre cidades:",
+                    options=itens_unicos
+                )
 
                 if item_selecionado_grafico:
-                    item_id_selecionado, cidade_selecionada = item_selecionado_grafico.split(" - ")
+                    # Prepara os dados e exibe o gráfico de linha
+                    df_grafico_comparativo = prepare_comparison_chart_data(dados_api, item_selecionado_grafico)
 
-                    # Filtra os dados da API para encontrar o histórico do item selecionado.
-                    dados_historicos = next((item for item in dados_api if item['item_id'] == item_id_selecionado and item['location'] == cidade_selecionada), None)
-
-                    if dados_historicos and dados_historicos['data']:
-                        # Cria e exibe um gráfico de linha com o histórico de preços.
-                        df_historico = pd.DataFrame(dados_historicos['data'])
-                        df_historico['timestamp'] = pd.to_datetime(df_historico['timestamp'])
-                        df_historico.set_index('timestamp', inplace=True)
-
-                        st.line_chart(df_historico['avg_price'])
+                    if not df_grafico_comparativo.empty:
+                        st.line_chart(df_grafico_comparativo)
                     else:
-                        st.warning("Não foi possível encontrar dados históricos para o item selecionado.")
+                        st.warning("Não há dados históricos suficientes para gerar o gráfico comparativo para este item.")
             else:
                 # Mensagem de erro se nenhum dado for retornado ou processado.
                 st.error("Não foram encontrados dados suficientes para calcular a variação. Verifique os IDs dos itens ou tente outras cidades.")
